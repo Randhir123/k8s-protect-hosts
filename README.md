@@ -4,7 +4,7 @@ Calico is a Container Network Interface (CNI) plugin that, in addition to CNI ca
 
 There are several ways to accomplish this, for example,
 
-1. Daemonset that runs a container on every node and installs needed artifacts
+1. DaemonSet that runs a container on every node and installs needed artifacts
 2. Static pod that runs on each node and installs needed artifacts
 3. Kubernetes Operator that makes sure that HostEndpoint object is created all nodes in the cluster
 
@@ -12,8 +12,19 @@ We will use the first option using Daemonset. Unlike DaemonSet, static Pods cann
 other Kubernetes API clients. Daemonset ensures that a copy of a Pod always run on all or certain hosts, 
 and it starts before other Pods.
 
-# Solution
-The proposed solution consists of creating a Daemonset that will launch a Pod per host. The Pod will run a container with script to install HostEndpoint object on that host, if required.
+# Solution Overview
+The proposed solution consists of creating a DaemonSet that will launch a Pod per host. The Pod will run a script to create HostEndpoint object for that host, if required.
 
 ![Solution Overview](/images/ds.JPG)
+ 
+As an example, we decide to enforce the following sample policy using HostEndpoint object:
+- Allow any egress traffic from the nodes.
+- Allow ingress SSH access to all nodes from a specific IP address.
+- Deny any other traffic.
 
+This results in the following sequence of steps:
+
+1. Creating the script
+2. Create a Docker image
+3. Create a DaemonSet
+4. Create Network policy 
