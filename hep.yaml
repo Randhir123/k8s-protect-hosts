@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hep-sa
+---
+
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: hep-cr
+rules:
+  - apiGroups: ["crd.projectcalico.org"]
+    resources:
+      - hostendpoints
+    verbs:
+      - create
+      - get
+      - list
+      - update
+      - watch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hep-crb
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hep-cr
+subjects:
+- kind: ServiceAccount
+  name: hep-sa
+  namespace: default
+---
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: hep-ds
+  labels:
+spec:
+  selector:
+    matchLabels:
+      name: hep-ds
+  template:
+    metadata:
+      labels:
+        name: hep-ds
+    spec:
+      serviceAccountName: hep-sa
+      containers:
+      - image: randhirkumars/hepinstall:v1
+        imagePullPolicy: Always
+        name: hep-install
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        securityContext:
+          runAsUser: 1337
