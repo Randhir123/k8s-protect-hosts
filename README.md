@@ -4,7 +4,7 @@ Calico is a Container Network Interface (CNI) plugin that, in addition to CNI ca
 
 There are several ways to accomplish this, for example,
 
-1. Daemonset that runs a container on every node and installs needed artifacts
+1. DaemonSet that runs a container on every node and installs needed artifacts
 2. Static pod that runs on each node and installs needed artifacts
 3. Kubernetes Operator that makes sure that HostEndpoint object is created all nodes in the cluster
 
@@ -12,8 +12,164 @@ We will use the first option using Daemonset. Unlike DaemonSet, static Pods cann
 other Kubernetes API clients. Daemonset ensures that a copy of a Pod always run on all or certain hosts, 
 and it starts before other Pods.
 
-# Solution
-The proposed solution consists of creating a Daemonset that will launch a Pod per host. The Pod will run a container with script to install HostEndpoint object on that host, if required.
+# Solution Overview
+The proposed solution consists of creating a DaemonSet that will launch a Pod per host. The Pod will run an application to create HostEndpoint object for that host, if required.
 
 ![Solution Overview](/images/ds.JPG)
+ 
+As an example, we decide to enforce the following sample policy using HostEndpoint object:
+- Allow any egress traffic from the nodes.
+- Allow ingress SSH access to all nodes from a specific IP address.
+- Deny any other traffic.
 
+This results in the following sequence of steps:
+
+1. Creating the application
+2. Create a Docker image
+3. Create a DaemonSet
+4. Create Network policy 
+
+## Creating the application
+We will use shell script to write our application. The script loops infinitely and checks if a HostEndpoint object is created for the host where it is running. If not, it uses kubectl client to create HostEndpoint object for the host that is applicable for all the host's interfaces. If the HostEndpoint objects exists already for the host, it sleeps for 10 seconds before continuing. Notice that the name of the node is injected into the script via an environment variable. Node name is obtained using Downward API that allows containers to consume information about themselves or the cluster.
+```
+#!/bin/sh
+
+while [ true ]; do
+
+  echo $NODE_NAME
+
+  kubectl get hostendpoint $NODE_NAME
+
+  if [ $? -eq 0 ]; then
+    echo "Found hep for node $NODE_NAME"
+    sleep 10
+    continue
+  fi
+
+  echo "Creating hep for node $NODE_NAME"
+
+  kubectl apply -f - <<EOF
+apiVersion: crd.projectcalico.org/v1
+kind: HostEndpoint
+metadata:
+  name: $NODE_NAME
+  labels:
+    host-endpoint: ingress
+spec:
+  interfaceName: "*"
+  node: "$NODE_NAME"
+EOF
+
+done
+```
+## Create a Docker image
+To deploy your app to Kubernetes, we first have to containerise it. To do so, create the following Dockerfile in the same directory as the source code file:
+```
+FROM alpine
+
+WORKDIR /app
+
+ADD https://storage.googleapis.com/kubernetes-release/release/v1.17.0/bin/linux/amd64/kubectl /usr/local/bin
+
+ADD run.sh /app
+
+RUN chmod +x /usr/local/bin/kubectl
+RUN chmod +x /app/run.sh
+CMD [ "/app/run.sh" ]
+```
+We are using Alpine as our base image as it is a minimal Linux distribution that allows us to run a shell script. To talk to the Kubernetes API server, we include kubectl in the image and add the script created in the last step. When the container starts, script is executed.
+
+Build the Docker image and push it to a Docker registry that is accessible from all the nodes in the Kubernetes cluster.
+```
+docker build -t randhirkumars/hepinstall:v1 .
+docker push randhirkumars/hepinstall:v1
+```
+Needless to say, we need to login to the Docker registry if it requires credentials to push an image.
+
+##  Create Network policy 
+
+## Create a DaemonSet
+Apart from the Docker image, to deploy our application on Kubernetes cluster, we need a few more artifacts.
+- A Pod that runs the image in a container
+- A Control plane object that watches over the Pod, DaemonSet in our case
+- A service account with which Pod runs
+- A cluster role that allows Pod to interact with API server for resources
+- A cluster role binding to bind the cluster role to the service account
+
+### Service Account
+This is the service account that the Pod uses.
+```
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hep-sa
+```
+### Cluster Role
+We need RBAC to runs APIs on API server for HostEndpoint objects. We have asked for all actions on HostEndpoint objects from the appropriate API group. 
+```
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: hep-cr
+rules:
+  - apiGroups: ["crd.projectcalico.org"]
+    resources:
+      - hostendpoints
+    verbs:
+      - create
+      - get
+      - list
+      - update
+      - watch
+```
+### Cluster role binding
+Next, we need to bind the role to the service account thereby providing permissions to the Pod.
+```
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hep-crb
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hep-cr
+subjects:
+- kind: ServiceAccount
+  name: hep-sa
+  namespace: default
+```
+### Pod and DaemonSet
+Finally, create a DaemonSet object that will create a Pod with the desired service account. The host name is injected as an environment variable to the container. It is good practice to not run container with root privileges. Here, we are using a non-root account to run the container.
+```
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: hep-ds
+  labels:
+spec:
+  selector:
+    matchLabels:
+      name: hep-ds
+  template:
+    metadata:
+      labels:
+        name: hep-ds
+    spec:
+      serviceAccountName: hep-sa
+      containers:
+      - image: randhirkumars/hepinstall:v1
+        imagePullPolicy: Always
+        name: hep-install
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        securityContext:
+          runAsUser: 1337
+```
+
+Create all the objects.
+```
+kubectl create -f hep.yaml
+```
