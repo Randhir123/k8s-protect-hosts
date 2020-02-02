@@ -62,6 +62,8 @@ EOF
 
 done
 ```
+The Network policy is applicable to any host that has label `host-endpoint`. We are creating the label here. The Network policies created later will check if the host has this label.
+
 ## Create a Docker image
 To deploy your app to Kubernetes, we first have to containerise it. To do so, create the following Dockerfile in the same directory as the source code file:
 ```
@@ -87,6 +89,87 @@ docker push randhirkumars/hepinstall:v1
 Needless to say, we need to login to the Docker registry if it requires credentials to push an image.
 
 ##  Create Network policy 
+GlobalNetworkPolicy and HostEndpoint objects from Calico are available as custom objects. We need to create corresponding CustomResourceDefinition (CRD) first.
+Create CRD for GlobalNetworkPolicy:
+```
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: globalnetworkpolicies.crd.projectcalico.org
+spec:
+  scope: Cluster
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: GlobalNetworkPolicy
+    plural: globalnetworkpolicies
+    singular: globalnetworkpolicy
+```
+and CRD for HostEndpoint:
+```
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: hostendpoints.crd.projectcalico.org
+spec:
+  scope: Cluster
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: HostEndpoint
+    plural: hostendpoints
+    singular: hostendpoint
+```
+```
+kubectl create -f crds.yaml
+```
+Next create policies to
+- Allow any egress traffic from the nodes.
+```
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: allow-outbound-external
+spec:
+  order: 10
+  egress:
+    - action: Allow
+  selector: has(host-endpoint)
+```
+- Allow ingress to all nodes from a specific IP address. Here, ingress traffic from CIDRs - [10.240.0.0/16, 192.168.0.0/16] are allowed.
+```
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: allow-cluster-internal-ingress
+spec:
+  order: 10
+  preDNAT: true
+  applyOnForward: true
+  ingress:
+    - action: Allow
+      source:
+        nets: [10.240.0.0/16, 192.168.0.0/16]
+  selector: has(host-endpoint)
+```
+- Deny any other traffic.
+```
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: drop-other-ingress
+spec:
+  order: 20
+  preDNAT: true
+  applyOnForward: true
+  ingress:
+    - action: Deny
+  selector: has(host-endpoint)
+```
+The order field is important here. The `drop-other-ingress` policy has a higher order value than `allow-cluster-internal-ingress`, so that it applies after `allow-cluster-internal-ingress`.
+```
+kubectl create -f policy.yaml
+```
 
 ## Create a DaemonSet
 Apart from the Docker image, to deploy our application on Kubernetes cluster, we need a few more artifacts.
@@ -171,5 +254,44 @@ spec:
 
 Create all the objects.
 ```
-kubectl create -f hep.yaml
+> kubectl apply -f hep.yaml
+serviceaccount/hep-sa created
+clusterrole.rbac.authorization.k8s.io/hep-cr created
+clusterrolebinding.rbac.authorization.k8s.io/hep-crb created
+daemonset.apps/hep-ds created
+
+> kubectl get po
+NAME                                     READY   STATUS    RESTARTS   AGE
+hep-ds-9jjtq                             1/1     Running   0          2s
+hep-ds-c97jz                             1/1     Running   0          2s
+hep-ds-fbghm                             1/1     Running   0          2s
+hep-ds-nbllb                             1/1     Running   0          2s
 ```
+Check the logs for a Pod to ensure it is creating HostEndpoint for that node.
+```
+> kubectl logs hep-ds-9jjtq
+k8s-node-2
+Error from server (NotFound): hostendpoints.crd.projectcalico.org "k8s-node-2" not found
+Creating hep for node k8s-node-2
+hostendpoint.crd.projectcalico.org/k8s-node-2 created
+k8s-node-2
+NAME                    AGE
+k8s-node-2   0s
+Found hep for node k8s-node-2
+k8s-node-2
+NAME                    AGE
+k8s-node-2   8s
+Found hep for node cicdcne132-k8s-node-2
+```
+Verify that HostEndpoint is created for each node.
+```
+> kubectl get hostendpoint
+NAME                         AGE
+k8s-master-nf-1   36s
+k8s-master-nf-2   39s
+k8s-master-nf-3   36s
+k8s-node-1        38s
+k8s-node-2        36s
+```
+## Test Network Policies
+TBD
