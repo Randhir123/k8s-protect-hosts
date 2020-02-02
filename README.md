@@ -62,6 +62,8 @@ EOF
 
 done
 ```
+The Network policy is applicable to any host that has label `host-endpoint`. We are creating the label here. The Network policies created later will check if the host has this label.
+
 ## Create a Docker image
 To deploy your app to Kubernetes, we first have to containerise it. To do so, create the following Dockerfile in the same directory as the source code file:
 ```
@@ -252,5 +254,44 @@ spec:
 
 Create all the objects.
 ```
-kubectl create -f hep.yaml
+> kubectl apply -f hep.yaml
+serviceaccount/hep-sa created
+clusterrole.rbac.authorization.k8s.io/hep-cr created
+clusterrolebinding.rbac.authorization.k8s.io/hep-crb created
+daemonset.apps/hep-ds created
+
+> kubectl get po
+NAME                                     READY   STATUS    RESTARTS   AGE
+hep-ds-9jjtq                             1/1     Running   0          2s
+hep-ds-c97jz                             1/1     Running   0          2s
+hep-ds-fbghm                             1/1     Running   0          2s
+hep-ds-nbllb                             1/1     Running   0          2s
 ```
+Check the logs for a Pod to ensure it is creating HostEndpoint for that node.
+```
+> kubectl logs hep-ds-9jjtq
+k8s-node-2
+Error from server (NotFound): hostendpoints.crd.projectcalico.org "k8s-node-2" not found
+Creating hep for node k8s-node-2
+hostendpoint.crd.projectcalico.org/k8s-node-2 created
+k8s-node-2
+NAME                    AGE
+k8s-node-2   0s
+Found hep for node k8s-node-2
+k8s-node-2
+NAME                    AGE
+k8s-node-2   8s
+Found hep for node cicdcne132-k8s-node-2
+```
+Verify that HostEndpoint is created for each node.
+```
+> kubectl get hostendpoint
+NAME                         AGE
+k8s-master-nf-1   36s
+k8s-master-nf-2   39s
+k8s-master-nf-3   36s
+k8s-node-1        38s
+k8s-node-2        36s
+```
+## Test Network Policies
+TBD
