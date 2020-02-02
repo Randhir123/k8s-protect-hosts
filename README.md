@@ -281,7 +281,7 @@ Found hep for node k8s-node-2
 k8s-node-2
 NAME                    AGE
 k8s-node-2   8s
-Found hep for node cicdcne132-k8s-node-2
+Found hep for node k8s-node-2
 ```
 Verify that HostEndpoint is created for each node.
 ```
