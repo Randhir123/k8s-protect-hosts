@@ -87,6 +87,87 @@ docker push randhirkumars/hepinstall:v1
 Needless to say, we need to login to the Docker registry if it requires credentials to push an image.
 
 ##  Create Network policy 
+GlobalNetworkPolicy and HostEndpoint objects from Calico are available as custom objects. We need to create corresponding CustomResourceDefinition (CRD) first.
+Create CRD for GlobalNetworkPolicy:
+```
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: globalnetworkpolicies.crd.projectcalico.org
+spec:
+  scope: Cluster
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: GlobalNetworkPolicy
+    plural: globalnetworkpolicies
+    singular: globalnetworkpolicy
+```
+and CRD for HostEndpoint:
+```
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: hostendpoints.crd.projectcalico.org
+spec:
+  scope: Cluster
+  group: crd.projectcalico.org
+  version: v1
+  names:
+    kind: HostEndpoint
+    plural: hostendpoints
+    singular: hostendpoint
+```
+```
+kubectl create -f crds.yaml
+```
+Next create policies to
+- Allow any egress traffic from the nodes.
+```
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: allow-outbound-external
+spec:
+  order: 10
+  egress:
+    - action: Allow
+  selector: has(host-endpoint)
+```
+- Allow ingress to all nodes from a specific IP address. Here, ingress traffic from CIDRs - [10.240.0.0/16, 192.168.0.0/16] are allowed.
+```
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: allow-cluster-internal-ingress
+spec:
+  order: 10
+  preDNAT: true
+  applyOnForward: true
+  ingress:
+    - action: Allow
+      source:
+        nets: [10.240.0.0/16, 192.168.0.0/16]
+  selector: has(host-endpoint)
+```
+- Deny any other traffic.
+```
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: drop-other-ingress
+spec:
+  order: 20
+  preDNAT: true
+  applyOnForward: true
+  ingress:
+    - action: Deny
+  selector: has(host-endpoint)
+```
+The order field is important here. The `drop-other-ingress` policy has a higher order value than `allow-cluster-internal-ingress`, so that it applies after `allow-cluster-internal-ingress`.
+```
+kubectl create -f policy.yaml
+```
 
 ## Create a DaemonSet
 Apart from the Docker image, to deploy our application on Kubernetes cluster, we need a few more artifacts.
