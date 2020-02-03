@@ -2,7 +2,7 @@
 The administrator of a Kubernetes cluster wants to secure it against incoming traffic from outside the cluster. 
 Calico is a Container Network Interface (CNI) plugin that, in addition to CNI capabilities, provides Network policies to control traffic between pods as well as firewall functionality to secure nodes. In order to utilize Calico's capabilities as a firewall to secure node using Calico's GlobalNetworkPolicy, a HostEndpoint would need to be created per network interface on the node. This is a one off job it could be automated within the installer. Since the nodes are ephemeral and policies can be dynamic, we need a way to manage HostEndpoint objects on each host even after installation.
 
-There are several ways to accomplish this, for example,
+There are several ways to accomplish this using Kubernetes approach, for example,
 
 1. DaemonSet that runs a container on every node and installs needed artifacts
 2. Static pod that runs on each node and installs needed artifacts
