@@ -8,6 +8,8 @@ There are several ways to accomplish this using Kubernetes approach, for example
 2. Static pod that runs on each node and installs needed artifacts
 3. Kubernetes Operator that makes sure that HostEndpoint object is created all nodes in the cluster
 
+Outside of Kubernetes, traditional approaches to endpoint protection involves installing an agent on the host and enforcing policies through this agent.
+
 We will use the first option using Daemonset. Unlike DaemonSet, static Pods cannot be managed with kubectl or 
 other Kubernetes API clients. Daemonset ensures that a copy of a Pod always run on all or certain hosts, 
 and it starts before other Pods.
